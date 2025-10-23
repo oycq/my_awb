@@ -30,6 +30,12 @@ class VideoCapture:
                 seq_num = int.from_bytes(header[:4], byteorder='big')
                 total_chunks = int.from_bytes(header[4:], byteorder='big')
                 payload = data[8:]
+
+                # 新增: 当收到 seq_num == 0 时，重置残留状态（假设新帧从0开始）
+                if seq_num == 0 and self.expected_chunks is not None:
+                    self.chunks.clear()
+                    self.expected_chunks = None
+
                 if self.expected_chunks is None:
                     self.expected_chunks = total_chunks
                 self.chunks[seq_num] = payload
