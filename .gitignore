@@ -1,2 +1,4 @@
 cam_server
 received_img.raw
+.vscode
+__pycache__
