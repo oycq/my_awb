@@ -2,20 +2,21 @@
 import cv2
 import time
 import numpy as np
-import cam_client  # 导入 cam_client 模块
+import cam_client
+import isp
 
-# 初始化 VideoCapture
+SCALE = 0.75  # 显示压缩比例
+
 cap = cam_client.VideoCapture()
 
-# 统计FPS
 frame_count = 0
 fps = 0.0
 start_time = time.time()
 
 while True:
-    img = cap.read()  # 阻塞读取图像
-
-    # 统计帧率
+    img = cap.read()
+    processed_img = isp.isp_process(img)
+    
     frame_count += 1
     curr_time = time.time()
     elapsed_time = curr_time - start_time
@@ -23,14 +24,16 @@ while True:
         fps = frame_count / elapsed_time
         frame_count = 0
         start_time = curr_time
-
-    # 显示帧率
+    
     text = f"FPS: {fps:.2f}"
-    cv2.putText(img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (1.0, 1.0, 1.0), 2, cv2.LINE_AA)
-
-    # 显示图像 (注意: img 是 float32 0-1，需要转换为 uint8 以显示)
-    cv2.imshow("Received Image", img)
-
+    cv2.putText(processed_img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+    
+    # 压缩显示尺寸
+    h, w = processed_img.shape[:2]
+    resized_img = cv2.resize(processed_img, (int(w * SCALE), int(h * SCALE)))
+    
+    cv2.imshow("Received Image", resized_img)
+    
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
