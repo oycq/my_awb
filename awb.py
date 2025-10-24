@@ -1,6 +1,9 @@
 import cv2
 import numpy as np
 
+MIN_THRESHOLD = 10 / 255.0
+MAX_THRESHOLD = 200 / 255.0
+
 cv2.namedWindow('AWB Scatter')
 cv2.setWindowProperty('AWB Scatter', cv2.WND_PROP_TOPMOST, 1)
 
@@ -32,6 +35,8 @@ def analysis_scatter(original_img, balanced_img):
         for j in range(32):
             b, g, r = original_img[i, j]
             if g == 0:
+                continue
+            if not (MIN_THRESHOLD < b < MAX_THRESHOLD and MIN_THRESHOLD < g < MAX_THRESHOLD and MIN_THRESHOLD < r < MAX_THRESHOLD):
                 continue
             x = r / g
             y = b / g
