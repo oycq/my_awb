@@ -1,6 +1,8 @@
 # isp.py
 import numpy as np
 import cv2
+from awb import awb_analysis
+import lsc
 
 # 预计算 sRGB gamma LUT (8-bit)
 LUT = np.zeros(256, dtype=np.uint8)
@@ -24,24 +26,29 @@ def isp_process(img_float: np.ndarray) -> np.ndarray:
     # 步骤2: 减去黑电平 (9.125)
     img -= 9.125
     img = np.clip(img, 0.0, 255.0)
+
+    # 步骤2.1: LSC
+    img = lsc.apply_lsc(img)
+    img = np.clip(img, 0.0, 255.0)
     
     # 转换为 uint8 以进行 demosaicing (假设 Bayer BG 图案，常见于许多传感器；如果不同，可调整)
     img_uint8 = img.astype(np.uint8)
     
     # 步骤3: 去马赛克 (demosaicing)，转换为线性 BGR
-    linear_bgr = cv2.cvtColor(img_uint8, cv2.COLOR_BayerBGGR2BGR)
+    linear_bgr = cv2.cvtColor(img_uint8, cv2.COLOR_BayerBGGR2BGR_VNG)
     
     # 转换为 float32 (0-1) 以进行白平衡和 gamma 校正
-    linear_rgb_float = linear_bgr.astype(np.float32) / 255.0  # 注意: OpenCV 是 BGR，所以这里是 linear BGR，但通道处理相同
+    linear_bgr_float = linear_bgr.astype(np.float32) / 255.0  # 注意: OpenCV 是 BGR，所以这里是 linear BGR，但通道处理相同
     
-    # 步骤4: 白平衡 (以绿色通道为参考，使 r 和 b 的均值等于 g 的均值，g 不变)
-    avgs = np.mean(linear_rgb_float, axis=(0,1))  # [avg_b, avg_g, avg_r]
-    ref_g = avgs[1]
-    scales = np.array([ref_g / avgs[0] if avgs[0] > 0 else 1.0, 1.0, ref_g / avgs[2] if avgs[2] > 0 else 1.0])
-    wb_rgb_float = np.clip(linear_rgb_float * scales[None, None, :], 0.0, 1.0)
-    
+    # 步骤4: 白平衡
+    k_b, k_r = awb_analysis(linear_bgr_float)
+    linear_bgr_float[:,:,0] *= k_b
+    linear_bgr_float[:,:,2] *= k_r
+    wb_bgr_float = np.clip(linear_bgr_float, 0.0, 1.0)
+    cv2.imshow("linear", wb_bgr_float)
+
     # 步骤5: 线性转 sRGB (使用预计算 LUT)
-    wb_uint8 = np.clip(wb_rgb_float * 255.0, 0, 255).astype(np.uint8)
+    wb_uint8 = np.clip(wb_bgr_float * 255.0, 0, 255).astype(np.uint8)
     srgb_uint8 = LUT[wb_uint8]
 
     return srgb_uint8  # 返回 BGR uint8，便于 cv2.imshow 和 putText
