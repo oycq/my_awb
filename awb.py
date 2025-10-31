@@ -6,6 +6,7 @@ import json
 
 MIN_THRESHOLD = 10 / 255.0
 MAX_THRESHOLD = 200 / 255.0
+WHITE_RATIO = 1.06
 
 cv2.namedWindow('AWB Scatter')
 cv2.setWindowProperty('AWB Scatter', cv2.WND_PROP_TOPMOST, 1)
@@ -47,9 +48,15 @@ def awb_analysis(img):
     balanced_img = np.clip(balanced_img, 0, 1)
     
     analysis_scatter(original_img, balanced_img)
-    return k_b, k_r
+    return 1 / avg_bg, 1 / avg_rg
+
+
+# 当前rg, gb
+avg_rg, avg_bg = 0.54, 0.62 #D65
+update_ratio = 0.995
 
 def analysis_scatter(original_img, balanced_img):
+    global avg_rg, avg_bg
     IMG_SHAPE = 450
     scale = IMG_SHAPE / 1.5
     
@@ -67,20 +74,46 @@ def analysis_scatter(original_img, balanced_img):
             cv2.rectangle(scatter_img, (px_min, py_for_y_max), (px_max, py_for_y_min), (0.2, 0.2, 0.2), -1)  # 填充矩形
     
     # 绘制像素散点
+    white_point_count = 0
     for i in range(32):
         for j in range(32):
+            b, g, r = balanced_img[i, j]
+            #亮度不能太亮不能太暗
+            if not MIN_THRESHOLD < b < MAX_THRESHOLD:
+                continue
+            if not MIN_THRESHOLD < g < MAX_THRESHOLD:
+                continue
+            if not MIN_THRESHOLD < r < MAX_THRESHOLD:
+                continue
+            #灰世界下是白块
+            if ((b / g) > WHITE_RATIO) or ((g / b) > WHITE_RATIO):
+                continue
+            if ((r / g) > WHITE_RATIO) or ((r / b) > WHITE_RATIO):
+                continue
+
             b, g, r = original_img[i, j]
             if g == 0:
                 continue
-            if not (MIN_THRESHOLD < b < MAX_THRESHOLD and MIN_THRESHOLD < g < MAX_THRESHOLD and MIN_THRESHOLD < r < MAX_THRESHOLD):
-                continue
-            x = r / g
-            y = b / g
-            px = int(x * scale)
-            py = IMG_SHAPE - 1 - int(y * scale)  # invert y for image coordinates (0 at top)
+            rg = r / g
+            bg = b / g
+
+            avg_rg = avg_rg  * update_ratio + rg * (1 - update_ratio)
+            avg_bg = avg_bg  * update_ratio + bg * (1 - update_ratio)
+            white_point_count += 1
+
+            px = int(rg * scale)
+            py = IMG_SHAPE - 1 - int(bg * scale)
             if 0 <= px < IMG_SHAPE and 0 <= py < IMG_SHAPE:
                 scatter_img[py, px] = balanced_img[i, j] * 2
-    
+
+    # 绘制白点数量
+    cv2.putText(scatter_img, str(white_point_count), (20,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (1, 1, 1), 1)
+
+    # 绘制(avg_rg, avg_bg)
+    px = int(avg_rg * scale)
+    py = IMG_SHAPE - 1 - int(avg_bg * scale)
+    cv2.circle(scatter_img, (px, py), 5, (0, 0, 255), 2)
+
     # 绘制参考点和标签
     for (rg, bg), label in zip(reference_rg_bg, reference_labels):
         px = int(rg * scale)
