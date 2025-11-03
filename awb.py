@@ -3,6 +3,7 @@
 import cv2
 import numpy as np
 import json
+import sys
 
 MIN_THRESHOLD = 10 / 255.0
 MAX_THRESHOLD = 200 / 255.0
@@ -12,15 +13,11 @@ cv2.namedWindow('AWB Scatter')
 cv2.setWindowProperty('AWB Scatter', cv2.WND_PROP_TOPMOST, 1)
 
 # 加载 JSON 数据（全局加载一次）
-try:
-    with open('results.json', 'r') as f:
-        data = json.load(f)
-    calibration_results = data['calibration_results']
-    white_point_regions = data['white_point_regions']
-except FileNotFoundError:
-    print("Warning: results.json not found. Reference points and white point regions will not be plotted.")
-    calibration_results = {}
-    white_point_regions = []
+with open('results.json', 'r') as f:
+    data = json.load(f)
+calibration_results = data['calibration_results']
+white_point_regions = data['white_point_regions']
+ccm_fit_params = data['ccm_fit_params']
 
 # 提取参考点
 reference_rg_bg = []
@@ -33,6 +30,11 @@ for key, value in calibration_results.items():
         bg = 1 / b_gain  # B/G
         reference_rg_bg.append((rg, bg))
         reference_labels.append(key)
+
+# 当前rg, bg (初始D65)
+avg_rg = 0.54
+avg_bg = 0.62
+update_ratio = 0.995
 
 def awb_analysis(img):
     original_img = cv2.resize(img, (32, 32)).astype(np.float32)
@@ -48,12 +50,26 @@ def awb_analysis(img):
     balanced_img = np.clip(balanced_img, 0, 1)
     
     analysis_scatter(original_img, balanced_img)
-    return 1 / avg_bg, 1 / avg_rg
-
-
-# 当前rg, gb
-avg_rg, avg_bg = 0.54, 0.62 #D65
-update_ratio = 0.995
+    
+    # 计算拟合CCM
+    ccm_flat = []
+    for params in ccm_fit_params:
+        k1, k2, bias = params
+        y = k1 * avg_rg + k2 * avg_bg + bias
+        ccm_flat.append(y)
+    ccm = np.reshape(ccm_flat, (3, 3))
+    
+    # 行归一化，确保每一行和为1
+    for i in range(3):
+        row_sum = np.sum(ccm[i])
+        if row_sum != 0:
+            ccm[i] /= row_sum
+    # ccm = ccm * 0
+    # ccm[0,0] = 1
+    # ccm[1,1] = 1
+    # ccm[2,2] = 1
+    #return k_b, k_r, ccm
+    return 1 / avg_bg, 1 / avg_rg, ccm
 
 def analysis_scatter(original_img, balanced_img):
     global avg_rg, avg_bg
@@ -78,17 +94,11 @@ def analysis_scatter(original_img, balanced_img):
     for i in range(32):
         for j in range(32):
             b, g, r = balanced_img[i, j]
-            #亮度不能太亮不能太暗
-            if not MIN_THRESHOLD < b < MAX_THRESHOLD:
+            # 亮度不能太亮不能太暗
+            if not (MIN_THRESHOLD < b < MAX_THRESHOLD and MIN_THRESHOLD < g < MAX_THRESHOLD and MIN_THRESHOLD < r < MAX_THRESHOLD):
                 continue
-            if not MIN_THRESHOLD < g < MAX_THRESHOLD:
-                continue
-            if not MIN_THRESHOLD < r < MAX_THRESHOLD:
-                continue
-            #灰世界下是白块
-            if ((b / g) > WHITE_RATIO) or ((g / b) > WHITE_RATIO):
-                continue
-            if ((r / g) > WHITE_RATIO) or ((r / b) > WHITE_RATIO):
+            # 灰世界下是白块
+            if max(b/g, g/b, r/g, g/r, r/b, b/r) > WHITE_RATIO:
                 continue
 
             b, g, r = original_img[i, j]
@@ -97,8 +107,8 @@ def analysis_scatter(original_img, balanced_img):
             rg = r / g
             bg = b / g
 
-            avg_rg = avg_rg  * update_ratio + rg * (1 - update_ratio)
-            avg_bg = avg_bg  * update_ratio + bg * (1 - update_ratio)
+            avg_rg = avg_rg * update_ratio + rg * (1 - update_ratio)
+            avg_bg = avg_bg * update_ratio + bg * (1 - update_ratio)
             white_point_count += 1
 
             px = int(rg * scale)
@@ -120,11 +130,28 @@ def analysis_scatter(original_img, balanced_img):
         py = IMG_SHAPE - 1 - int(bg * scale)
         if 0 <= px < IMG_SHAPE and 0 <= py < IMG_SHAPE:
             cv2.circle(scatter_img, (px, py), 5, (1, 0, 0), 2)
-    for (rg, bg), label in zip(reference_rg_bg, reference_labels):
-        px = int(rg * scale)
-        py = IMG_SHAPE - 1 - int(bg * scale)
-        if 0 <= px < IMG_SHAPE and 0 <= py < IMG_SHAPE:
             cv2.putText(scatter_img, label, (px + 10, py), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (1, 1, 1), 1)
+
+    # 计算CCM并在右上角显示（保留两位小数）
+    ccm_flat = []
+    for params in ccm_fit_params:
+        k1, k2, bias = params
+        y = k1 * avg_rg + k2 * avg_bg + bias
+        ccm_flat.append(y)
+    ccm = np.reshape(ccm_flat, (3, 3))
+    
+    # 行归一化，确保每一行和为1
+    for i in range(3):
+        row_sum = np.sum(ccm[i])
+        if row_sum != 0:
+            ccm[i] /= row_sum
+    
+    # 显示CCM在右上角
+    x_pos = IMG_SHAPE - 150
+    y_pos = 20
+    for i in range(3):
+        row_str = f"{ccm[i,0]:.2f} {ccm[i,1]:.2f} {ccm[i,2]:.2f}"
+        cv2.putText(scatter_img, row_str, (x_pos, y_pos + i*20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (1, 1, 1), 1)
     
     # Show the scatter
     cv2.imshow('AWB Scatter', scatter_img)
