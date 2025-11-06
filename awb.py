@@ -5,9 +5,9 @@ import numpy as np
 import json
 import sys
 
-MIN_THRESHOLD = 10 / 255.0
-MAX_THRESHOLD = 200 / 255.0
-WHITE_RATIO = 1.06
+LUM_MIN_THROAT = 10 / 255.0
+LUM_MAX_THROAT = 220 / 255.0
+update_ratio = 0.999
 
 cv2.namedWindow('AWB Scatter')
 cv2.setWindowProperty('AWB Scatter', cv2.WND_PROP_TOPMOST, 1)
@@ -34,22 +34,11 @@ for key, value in calibration_results.items():
 # 当前rg, bg (初始D65)
 avg_rg = 0.54
 avg_bg = 0.62
-update_ratio = 0.995
 
 def awb_analysis(img):
     original_img = cv2.resize(img, (32, 32)).astype(np.float32)
-    b_mean = original_img[:, :, 0].mean()
-    g_mean = original_img[:, :, 1].mean()
-    r_mean = original_img[:, :, 2].mean()
-    k_b = g_mean / b_mean if b_mean != 0 else 1.0
-    k_r = g_mean / r_mean if r_mean != 0 else 1.0
     
-    balanced_img = np.copy(original_img)
-    balanced_img[:, :, 0] *= k_b
-    balanced_img[:, :, 2] *= k_r
-    balanced_img = np.clip(balanced_img, 0, 1)
-    
-    analysis_scatter(original_img, balanced_img)
+    analysis_scatter(original_img)
     
     # 计算拟合CCM
     ccm_flat = []
@@ -71,7 +60,7 @@ def awb_analysis(img):
     #return k_b, k_r, ccm
     return 1 / avg_bg, 1 / avg_rg, ccm
 
-def analysis_scatter(original_img, balanced_img):
+def analysis_scatter(original_img):
     global avg_rg, avg_bg
     IMG_SHAPE = 450
     scale = IMG_SHAPE / 1.5
@@ -93,20 +82,28 @@ def analysis_scatter(original_img, balanced_img):
     white_point_count = 0
     for i in range(32):
         for j in range(32):
-            b, g, r = balanced_img[i, j]
-            # 亮度不能太亮不能太暗
-            if not (MIN_THRESHOLD < b < MAX_THRESHOLD and MIN_THRESHOLD < g < MAX_THRESHOLD and MIN_THRESHOLD < r < MAX_THRESHOLD):
-                continue
-            # 灰世界下是白块
-            if max(b/g, g/b, r/g, g/r, r/b, b/r) > WHITE_RATIO:
+            # 过滤掉过曝像素点与欠曝像素点
+            b, g, r = original_img[i, j]
+            max_val = max(b, g, r)
+            avg_val = (b + g + r) / 3
+            if not (max_val < LUM_MAX_THROAT and avg_val > LUM_MIN_THROAT):
                 continue
 
-            b, g, r = original_img[i, j]
+            #过滤掉white_point_regions外的像素点
             if g == 0:
                 continue
             rg = r / g
             bg = b / g
+            in_region = False
+            for region in white_point_regions:
+                x0, x1, y0, y1 = region
+                if x0 <= rg <= x1 and y0 <= bg <= y1:
+                    in_region = True
+                    break
+            if not in_region:
+                continue
 
+            # 更新awb比值
             avg_rg = avg_rg * update_ratio + rg * (1 - update_ratio)
             avg_bg = avg_bg * update_ratio + bg * (1 - update_ratio)
             white_point_count += 1
@@ -114,7 +111,7 @@ def analysis_scatter(original_img, balanced_img):
             px = int(rg * scale)
             py = IMG_SHAPE - 1 - int(bg * scale)
             if 0 <= px < IMG_SHAPE and 0 <= py < IMG_SHAPE:
-                scatter_img[py, px] = balanced_img[i, j] * 2
+                scatter_img[py, px] = 1#balanced_img[i, j] * 10
 
     # 绘制白点数量
     cv2.putText(scatter_img, str(white_point_count), (20,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (1, 1, 1), 1)
