@@ -27,7 +27,7 @@ def reinhard_tonemap(bgr_float: np.ndarray) -> np.ndarray:
     x = Y
     # --- Naka-Rushton TMO (基于视觉生理响应曲线) ---
     n = 1.5  # 响应斜率，可调 0.8–1.2
-    sigma = 0.18  # 半饱和亮度，可随场景调节
+    sigma = 0.24  # 半饱和亮度，可随场景调节
     Y = Y ** n
     mapped_Y = Y / (Y + sigma ** n)
     mapped_Y = np.clip(mapped_Y, 0, 1)
