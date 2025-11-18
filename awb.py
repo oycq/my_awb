@@ -7,7 +7,7 @@ import sys
 
 LUM_MIN_THROAT = 10 / 255.0
 LUM_MAX_THROAT = 220 / 255.0
-update_ratio = 0.999
+update_ratio = 0.9995
 
 cv2.namedWindow('AWB Scatter')
 cv2.setWindowProperty('AWB Scatter', cv2.WND_PROP_TOPMOST, 1)
